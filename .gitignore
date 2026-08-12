@@ -66,3 +66,27 @@ checkpoints/
 # Logs
 *.log
 logs/
+
+# llama.cpp submodule build artifacts
+# Note: llama.cpp/ directory itself is a git submodule and should NOT be ignored
+# But we ignore build artifacts, binaries, and generated files
+llama.cpp/build/
+llama.cpp/*.o
+llama.cpp/*.so
+llama.cpp/*.dylib
+llama.cpp/*.dll
+llama.cpp/*.exe
+llama.cpp/llama-*
+llama.cpp/quantize
+llama.cpp/gguf
+llama.cpp/*.gguf
+llama.cpp/*.bin
+llama.cpp/*.log
+llama.cpp/.cache/
+llama.cpp/CMakeCache.txt
+llama.cpp/CMakeFiles/
+llama.cpp/cmake_install.cmake
+llama.cpp/Makefile
+# Ignore all build directories inside llama.cpp
+llama.cpp/**/build/
+llama.cpp/**/cmake-build-*/
