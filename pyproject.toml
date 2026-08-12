@@ -40,9 +40,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/username/moe-experiment"
-Repository = "https://github.com/username/moe-experiment"
-Issues = "https://github.com/username/moe-experiment/issues"
+Homepage = "https://github.com/arthur999999/moe-experiment"
+Repository = "https://github.com/arthur999999/moe-experiment"
+Issues = "https://github.com/arthur999999/moe-experiment/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/moe_experiment"]
