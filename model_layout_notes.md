@@ -12,6 +12,7 @@
 6. [Peak RSS Measurements](#peak-rss-measurements)
 7. [Open Items for Phase 8](#open-items-for-phase-8)
 8. [Baseline Configuration Decision](#baseline-configuration-decision)
+9. [Reference Output Extraction Pipeline](#reference-output-extraction-pipeline)
 
 ---
 
@@ -178,3 +179,42 @@ Why no-repack is faster here is not fully understood. Candidate explanations:
 Not investigated further — out of scope for now.
 
 ---
+
+## Reference Output Extraction Pipeline
+
+The `reference_output.txt` file is the **correctness gate** for every future phase (streaming implementations must match this byte-for-byte, or in practice text-for-text given ANSI/whitespace stripping).
+
+### Fixed Configuration
+
+```bash
+-p "Explain how mixture of experts routing works." -n 128 -t 4 \
+  --temp 0 --top-k 1 --seed 42 -no-cnv -st --no-repack
+```
+
+### Extraction Pipeline
+
+**Problem:** llama-cli's stdout includes an ASCII banner, ANSI color codes, and prompt echo even with `--simple-io --log-disable`, so raw stdout is not usable directly as a reference.
+
+**Solution:**
+
+**Step 1:** Generate raw output
+```bash
+./llama.cpp/build/bin/llama-cli \
+  -m ./models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf \
+  -p "Explain how mixture of experts routing works." \
+  -n 128 -t 4 --temp 0 --top-k 1 --seed 42 -no-cnv -st --no-repack \
+  --simple-io --log-disable \
+  > reference_output_raw.txt
+```
+
+**Step 2:** Clean and extract generated text
+```bash
+sed 's/\x1b\[[0-9;]*m//g' reference_output_raw.txt \
+  | awk '/^> Explain/{flag=1; next} /^\[ Prompt:/{flag=0} flag' \
+  | sed '/^$/N;/^\n$/D' \
+  > reference_output.txt
+```
+
+### Important Note
+
+The awk filter matches on `^> Explain` specifically — if the prompt text changes in a future run, this filter needs updating to match the new prompt's echo line.
