@@ -86,7 +86,7 @@ Repeat Phases 3–7's validated pipeline against progressively larger models tha
 - CMake, a C/C++ compiler (build-essential or equivalent)
 - 8GB+ RAM (the whole point of the project is making this sufficient for models that would otherwise need much more)
 - Enough free disk space for the model files in use (tens of GB for later phases)
-- [huggingface-cli](https://huggingface.co/docs/huggingface_hub/en/guides/cli) (for downloading models)
+- [huggingface-hub](https://huggingface.co/docs/huggingface_hub) Python library (for downloading models)
 
 ### Setup
 
@@ -121,16 +121,23 @@ chmod +x download_model.sh
 ./download_model.sh
 ```
 
-#### Option 2: Manual download
+#### Option 2: Manual download (Python)
 
 ```bash
 # Create models directory
 mkdir -p models
 
-# Download using huggingface-cli
-huggingface-cli download bartowski/OLMoE-1B-7B-0924-Instruct-GGUF \
-    --include "OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf" \
-    --local-dir ./models
+# Download using Python/huggingface_hub
+python << 'EOF'
+from huggingface_hub import hf_hub_download
+
+hf_hub_download(
+    repo_id="bartowski/OLMoE-1B-7B-0924-Instruct-GGUF",
+    filename="OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf",
+    local_dir="./models",
+    local_dir_use_symlinks=False
+)
+EOF
 ```
 
 The model file (~4.2GB) will be saved to `./models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf`.
