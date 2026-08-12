@@ -86,6 +86,7 @@ Repeat Phases 3–7's validated pipeline against progressively larger models tha
 - CMake, a C/C++ compiler (build-essential or equivalent)
 - 8GB+ RAM (the whole point of the project is making this sufficient for models that would otherwise need much more)
 - Enough free disk space for the model files in use (tens of GB for later phases)
+- [huggingface-cli](https://huggingface.co/docs/huggingface_hub/en/guides/cli) (for downloading models)
 
 ### Setup
 
@@ -103,7 +104,36 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
 # Install with development dependencies
 pip install -e ".[dev]"
+
+# Install huggingface-hub for model downloads
+pip install huggingface-hub
 ```
+
+### Download Phase 1 Model
+
+This project uses **OLMoE-1B-7B-0924-Instruct** (Q4_K_M quantized) as the baseline model for Phase 1.
+
+#### Option 1: Using the download script
+
+```bash
+# Make the script executable and run it
+chmod +x download_model.sh
+./download_model.sh
+```
+
+#### Option 2: Manual download
+
+```bash
+# Create models directory
+mkdir -p models
+
+# Download using huggingface-cli
+huggingface-cli download bartowski/OLMoE-1B-7B-0924-Instruct-GGUF \
+    --include "OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf" \
+    --local-dir ./models
+```
+
+The model file (~4.2GB) will be saved to `./models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf`.
 
 ### Building llama.cpp (baseline, Phase 1)
 
