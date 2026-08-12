@@ -7,12 +7,14 @@
 1. [Architecture Metadata](#architecture-metadata)
 2. [Relevant Tensors per Layer](#relevant-tensors-per-layer)
 3. [CPU_REPACK Memory Duplication](#cpu_repack-memory-duplication)
-4. [Scale Tensors (Pending Investigation)](#scale-tensors-pending-investigation)
+4. [Scale Tensors Investigation](#scale-tensors-investigation)
 5. [Performance Baseline](#performance-baseline)
 6. [Peak RSS Measurements](#peak-rss-measurements)
-7. [Open Items for Phase 8](#open-items-for-phase-8)
-8. [Baseline Configuration Decision](#baseline-configuration-decision)
-9. [Reference Output Extraction Pipeline](#reference-output-extraction-pipeline)
+7. [Phase 8 Inspection Results](#phase-8-inspection-results)
+8. [Open Items](#open-items)
+9. [Baseline Configuration Decision](#baseline-configuration-decision)
+10. [Reference Output Extraction Pipeline](#reference-output-extraction-pipeline)
+11. [Reference Output Portability Note](#reference-output-portability-note)
 
 ---
 
@@ -67,18 +69,22 @@ We also need to decide whether to disable repacking when implementing streaming 
 
 ---
 
-## Scale Tensors (Pending Investigation)
+## Scale Tensors Investigation
 
-**Not fully understood yet.**
+### Initial Finding
 
-The load log shows extra tensors per layer, e.g.:
+The load log showed extra tensors per layer, e.g.:
 - `blk.N.ffn_gate_exps.scale`
 - `blk.N.ffn_gate_exps.input_scale`
 - (same pattern for attn_q, attn_k, attn_v, attn_output, ffn_down_exps, ffn_up_exps)
 
-We haven't confirmed the exact purpose of these extra tensors in this specific file yet (possibly related to imatrix-based quantization, which the metadata confirms is present: quantize.imatrix.file, quantize.imatrix.dataset, quantize.imatrix.entries_count = 128).
+### Resolution (via Phase 8)
 
-**Action:** INVESTIGATE in Phase 8 (inspection via gguf-py) before calculating per-expert offsets — these scale tensors also need to be accounted for if they affect per-expert size.
+**RESOLVED:** `.scale` / `.input_scale` tensors do NOT exist in the file.
+
+Searched all 195 tensors for "scale" in the name — found ZERO matches. The tensors seen in llama.cpp's load log are runtime-allocated buffers (likely part of a generic dynamic quantization code path that exists regardless of architecture, left unused/empty for pre-quantized GGUF).
+
+**Implication:** These do NOT need to be accounted for when calculating per-expert byte offsets — they don't come from the file.
 
 ---
 
@@ -126,18 +132,86 @@ Even a "small" model (6.9B total / 1.7B active) already uses nearly the entire 8
 
 ---
 
-## Open Items for Phase 8
+## Phase 8 Inspection Results
 
-Investigation tasks via gguf-py:
+### Tensor Count Sanity Check
 
-- [ ] Confirm the exact shape of the fused tensor `ffn_gate_exps.weight`
-      (expected: something like [n_expert=64, n_ff=1024, n_embd=2048], but
-      CONFIRM the exact axis order by reading it via gguf-py)
-- [ ] Confirm the byte offset of each tensor within the file
-- [ ] Calculate bytes per individual expert (stride) within the fused tensor
-- [ ] Understand the purpose of the .scale / .input_scale tensors and
-      whether they affect the per-expert offset calculation
-- [ ] Confirm whether a flag exists to disable CPU_REPACK at build/runtime
+Total tensors read via gguf-py: **195** — matches llama.cpp's load log ("loaded meta data with 43 key-value pairs and 195 tensors"). Confirms gguf-py is reading the same file correctly.
+
+### Shape Order Convention
+
+**Confirmed:** shape order is ggml convention (ne[0] fastest-varying). gguf-py reports tensor.shape in ggml's [ne0, ne1, ne2, ...] order — NOT numpy/C convention. The expert axis is NOT always shape[0]; its position must be located by matching against the known expert_count (64), not assumed.
+
+### Per-Layer Expert Tensors (Layer 0 Reference)
+
+#### blk.0.ffn_gate_exps.weight
+
+| Attribute | Value |
+|-----------|-------|
+| Shape (ggml order) | [2048, 1024, 64] → [n_embd, n_ff, n_expert] |
+| Expert axis index | 2 |
+| Tensor type | 12 (Q4_K) |
+| Total bytes | 75,497,472 |
+| Bytes per expert | 1,179,648 (n_bytes / 64) |
+| Data offset (file) | 169,841,472 |
+| **Offset formula** | `offset(expert K) = 169,841,472 + K * 1,179,648` |
+
+#### blk.0.ffn_up_exps.weight
+
+| Attribute | Value |
+|-----------|-------|
+| Shape (ggml order) | [2048, 1024, 64] → same layout as gate |
+| Tensor type | 12 (Q4_K) |
+| Total bytes | 75,497,472 |
+| Bytes per expert | 1,179,648 |
+| Data offset (file) | 245,338,944 |
+| **Offset formula** | `offset(expert K) = 245,338,944 + K * 1,179,648` |
+
+#### blk.0.ffn_down_exps.weight
+
+| Attribute | Value |
+|-----------|-------|
+| Shape (ggml order) | [1024, 2048, 64] → [n_ff, n_embd, n_expert] |
+| Expert axis index | 2 |
+| Notes | Axis order REVERSED vs gate/up (down projects ff→embd, gate/up project embd→ff). Same n_elements by coincidence, but do NOT assume down always matches gate/up for other models. |
+| Tensor type | 14 (Q6_K) |
+| Total bytes | 110,100,480 |
+| Bytes per expert | 1,720,320 (n_bytes / 64) |
+| Data offset (file) | 59,740,992 |
+| **Offset formula** | `offset(expert K) = 59,740,992 + K * 1,720,320` |
+
+### Quantization Types Confirmed
+
+| Type Code | Quantization | Used By |
+|-----------|-------------|---------|
+| 12 | Q4_K | ffn_gate_exps, ffn_up_exps |
+| 14 | Q6_K | ffn_down_exps |
+
+This matches the file-level breakdown (97 tensors q4_K, 17 tensors q6_K, 81 tensors f32) and is a common mixed-quantization choice — the down-projection is often kept at higher precision (Q6_K) since it tends to be more sensitive to quantization error.
+
+### Implication for Phase 2
+
+When reading raw expert slices from disk:
+- Gate/up experts must be interpreted as **Q4_K** blocks
+- Down experts must be interpreted as **Q6_K** blocks
+
+These have different block sizes/layouts internally, already reflected in the differing bytes-per-expert (1,179,648 for Q4_K vs 1,720,320 for Q6_K). The actual in-block byte structure must be read from ggml's quantization format definitions before writing a decoder.
+
+---
+
+## Open Items
+
+### Before Phase 2
+
+- [ ] Confirm exact ggml quantization type names for tensor_type 12 and 14
+- [ ] Understand Q4_K and Q6_K block layouts for raw byte interpretation
+
+### General
+
+- [x] Confirm byte offset of each tensor within the file (DONE)
+- [x] Calculate bytes per individual expert (stride) within fused tensors (DONE)
+- [x] Understand the purpose of .scale / .input_scale tensors (RESOLVED: runtime buffers, not in file)
+- [x] Confirm whether a flag exists to disable CPU_REPACK (DONE: `--no-repack`)
 
 ---
 
@@ -218,3 +292,15 @@ sed 's/\x1b\[[0-9;]*m//g' reference_output_raw.txt \
 ### Important Note
 
 The awk filter matches on `^> Explain` specifically — if the prompt text changes in a future run, this filter needs updating to match the new prompt's echo line.
+
+---
+
+## Reference Output Portability Note
+
+`reference_output.txt` IS committed to git — it's the correctness gate used by `compare_output.py`. However, greedy-decoded output is only guaranteed reproducible on the exact hardware + llama.cpp build that generated it.
+
+**Proof:** `--repack` vs `--no-repack` alone changes output on the SAME machine, due to floating-point reduction order differences.
+
+**Implication:** If this project moves to different hardware or a newer llama.cpp build, `reference_output.txt` likely needs to be regenerated before `compare_output.py` can be trusted again.
+
+---

@@ -32,6 +32,10 @@ Run a small MoE model (**OLMoE-1B-7B**, Q4_K_M) fully resident in RAM using stoc
 - Record a **reference output** (exact generated tokens under greedy decoding) — this becomes the correctness gate for every phase that follows
 - Inspect the GGUF file's internal tensor layout to understand how experts are stored (fused tensor shape, quantization type, byte offsets per expert)
 
+**Utilities:**
+- `inspect_gguf.py` — Python script using gguf-py to inspect tensor shapes, offsets, and quantization types
+- `compare_output.py` — Validates current llama.cpp output against the saved reference output
+
 **Exit criteria:** reproducible baseline numbers, a saved reference output, and a documented map of the expert tensor layout.
 
 ### Phase 2 — Manual expert reads
@@ -149,6 +153,34 @@ cmake -B llama.cpp/build -S llama.cpp -DCMAKE_BUILD_TYPE=Release
 cmake --build llama.cpp/build --config Release -j$(nproc)
 ```
 
+### Phase 1 Utilities
+
+#### inspect_gguf.py
+
+Inspects the GGUF file to extract tensor metadata (shapes, offsets, quantization types):
+
+```bash
+python inspect_gguf.py
+```
+
+**Output:** Architecture metadata, expert tensor shapes, file offsets, and per-expert byte calculations.
+
+#### compare_output.py
+
+Validates that current llama.cpp runs match the saved reference output:
+
+```bash
+# Basic usage (uses default config)
+python compare_output.py
+
+# Pass extra flags to llama-cli
+python compare_output.py --extra-args --some-flag
+```
+
+**Output:** "MATCH" if output identical to reference, "MISMATCH" with diff if different.
+
+**Note:** The reference output is hardware/build-specific. See [model_layout_notes.md](model_layout_notes.md) for portability details.
+
 ## Benchmarks
 
 Populated as each phase completes. No numbers are published here until they've been measured on real hardware with a fixed, documented configuration (device, thread count, prompt, seed).
@@ -196,6 +228,23 @@ mypy src/
 ### Tooling
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) — GGUF inference engine used unmodified, streaming hooks into its public API
 - [gguf-py](https://github.com/ggml-org/llama.cpp/tree/master/gguf-py) — GGUF format reading, used for tensor layout inspection
+
+### Project Files
+
+```
+moe-experiment/
+├── models/                          # Downloaded model files (gitignored)
+│   └── OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf
+├── reference_output.txt             # Phase 1 correctness gate (committed)
+├── reference_output_raw.txt         # Raw llama-cli output (gitignored)
+├── model_layout_notes.md            # Detailed model analysis
+├── download_model.sh                # Model download script
+├── inspect_gguf.py                  # GGUF file inspector
+├── compare_output.py                # Output validator
+└── ...
+```
+
+**Important:** `reference_output.txt` is committed as the correctness gate, but output is only reproducible on the exact hardware/llama.cpp build that generated it. See model_layout_notes.md for details.
 
 ## Research notes
 

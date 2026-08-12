@@ -1,0 +1,39 @@
+
+
+Loading model... 
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b10380-0b1bad14f
+model      : ./models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf
+ftype      : Q4_K - Medium
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+[1m[32m
+> Explain how mixture of experts routing works.
+[0mMixture of Experts (MoE) routing is a machine learning technique used to solve complex decision-making problems. It is particularly useful when the problem at hand is too complex for a single model to handle, and a combination of multiple models is required.
+
+The basic idea behind MoE routing is to create a "committee" of experts, where each expert is a machine learning model trained to solve a specific sub-problem. The committee then makes decisions by combining the outputs of all the individual experts.
+
+Here's a step-by-step explanation of how MoE routing works:
+
+1. Define the problem
+[35m
+[ Prompt: 73,8 t/s | Generation: 23,8 t/s ]
+[0m
+
+Exiting...
