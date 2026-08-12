@@ -25,26 +25,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "anyio>=4.14.0",
-    "certifi>=2026.0.0",
-    "charset-normalizer>=3.4.0",
-    "click>=8.4.0",
-    "filelock>=3.32.0",
-    "fsspec>=2026.0.0",
     "gguf>=0.19.0",
-    "h11>=0.16.0",
-    "hf-xet>=1.6.0",
-    "httpcore>=1.0.0",
-    "httpx>=0.28.0",
     "huggingface-hub>=1.27.0",
-    "idna>=3.18.0",
     "numpy>=2.5.0",
-    "packaging>=26.0.0",
-    "PyYAML>=6.0.0",
-    "requests>=2.34.0",
-    "tqdm>=4.70.0",
-    "typing-extensions>=4.16.0",
-    "urllib3>=2.7.0",
 ]
 
 [project.optional-dependencies]
