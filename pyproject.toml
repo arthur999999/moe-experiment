@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Arthur Honorato", email = "arthurhono.contato@gmail.com"}
 ]
 keywords = ["machine-learning", "moe", "neural-networks", "huggingface"]
 classifiers = [
