@@ -90,6 +90,11 @@ Searched all 195 tensors for "scale" in the name — found ZERO matches. The ten
 
 ## Performance Baseline
 
+> **Superseded**: these numbers used the default (repack-enabled)
+> config, before the `--no-repack` decision was made. See
+> "Baseline Configuration Decision" below — `--no-repack` is the
+> official baseline going forward. Kept here for historical record only.
+
 Phase 1 results with fixed config: `-n 128 -t 4 --temp 0 --top-k 1 --seed 42 -no-cnv -st`
 
 | Run    | Prompt t/s | Generation t/s |
@@ -109,6 +114,10 @@ Phase 1 results with fixed config: `-n 128 -t 4 --temp 0 --top-k 1 --seed 42 -no
 ---
 
 ## Peak RSS Measurements
+
+> **Superseded**: measured with the default (repack-enabled) config.
+> See "Baseline Configuration Decision" below for the current official
+> number (4.68 GB peak RSS with `--no-repack`).
 
 Measured via `/usr/bin/time -v`:
 
@@ -288,6 +297,21 @@ sed 's/\x1b\[[0-9;]*m//g' reference_output_raw.txt \
   | sed '/^$/N;/^\n$/D' \
   > reference_output.txt
 ```
+
+**Step 3:** Normalize trailing whitespace to match `compare_output.py`
+```bash
+python3 -c "
+content = open('reference_output.txt').read()
+content = content.strip() + '\n'
+open('reference_output.txt', 'w').write(content)
+"
+```
+
+Without this step, `compare_output.py` reports a false MISMATCH due to
+a trailing blank line left by the sed/awk pipeline above, even though
+the generated text content is identical. This bit us during Phase 1
+validation — see the script's `clean_output()` for the matching
+normalization on the "current" side.
 
 ### Important Note
 
