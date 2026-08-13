@@ -240,6 +240,24 @@ Discovered and documented during Phase 2: `tensor.data` for quantized types is N
 
 Using flat byte slicing (`tensor.data[start:end]`) silently produces wrong results (returns whole array for expert 0 due to Python's slice clamping, empty arrays for others) without raising errors — a dangerous silent-failure mode to watch for.
 
+### Process Note: Verification Must Be Repeated Per Model
+
+Everything discovered in Phase 2 (offset formula behavior, block alignment, and especially the per-layer quantization variability) is **specific to THIS file**. Different architectures, different quantization schemes, or even a different quantization of the same model may:
+
+- Use a different number of tensors per expert
+- Put the expert axis in a different shape position
+- Use different (or more varied) quantization types per tensor
+- Not have a clean divisor between n_bytes and n_expert at all
+
+`phase2_manual_expert_read.py` was written to discover these properties from metadata rather than assume them, and includes explicit guards (e.g. raises if the expert axis isn't where expected).
+
+**Mandatory Onboarding Step:** Going forward, running this verification script against a NEW model — and getting a clean PASS on all sampled combinations — is a **mandatory** step before trusting any offset math for that model, not an optional sanity check.
+
+**Applies to:** Every model introduced in Phase 8:
+- Qwen1.5-MoE-A2.7B
+- Qwen3-30B-A3B
+- Final ~27B target
+
 ---
 
 ## Open Items
