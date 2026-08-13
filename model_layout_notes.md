@@ -8,13 +8,14 @@
 2. [Relevant Tensors per Layer](#relevant-tensors-per-layer)
 3. [CPU_REPACK Memory Duplication](#cpu_repack-memory-duplication)
 4. [Scale Tensors Investigation](#scale-tensors-investigation)
-5. [Performance Baseline](#performance-baseline)
-6. [Peak RSS Measurements](#peak-rss-measurements)
-7. [Phase 8 Inspection Results](#phase-8-inspection-results)
-8. [Open Items](#open-items)
-9. [Baseline Configuration Decision](#baseline-configuration-decision)
-10. [Reference Output Extraction Pipeline](#reference-output-extraction-pipeline)
-11. [Reference Output Portability Note](#reference-output-portability-note)
+5. [Phase 2 Results](#phase-2-results)
+6. [Performance Baseline](#performance-baseline)
+7. [Peak RSS Measurements](#peak-rss-measurements)
+8. [Phase 8 Inspection Results](#phase-8-inspection-results)
+9. [Open Items](#open-items)
+10. [Baseline Configuration Decision](#baseline-configuration-decision)
+11. [Reference Output Extraction Pipeline](#reference-output-extraction-pipeline)
+12. [Reference Output Portability Note](#reference-output-portability-note)
 
 ---
 
@@ -208,12 +209,40 @@ These have different block sizes/layouts internally, already reflected in the di
 
 ---
 
+## Phase 2 Results
+
+### Correctness Gate: PASSED (36/36)
+
+Tested 3 layers (0, 8, 15) × 3 tensor kinds (gate/up/down) × 4 expert indices (0, 1, 31, 63) = 36 combinations. For each:
+1. Computed the expert's file offset independently from GGUF metadata
+2. Verified offset/size land on exact quantization block boundaries
+3. Read exact byte range directly from raw file via `open()/seek()/read()`
+4. Compared against equivalent slice from gguf-py's tensor data
+5. All 36 matched byte-for-byte
+
+### Key Correction: Quantization Types Vary Per-Layer
+
+Earlier assumption that ffn_down_exps is always Q6_K and ffn_gate/up_exps are always Q4_K is **WRONG**. Phase 2 testing revealed:
+
+| Layer | Tensor | Quantization | Bytes/Expert |
+|-------|--------|-------------|--------------|
+| 0 | ffn_down_exps | Q6_K | 1,720,320 |
+| 8 | ffn_down_exps | Q4_K | 1,179,648 |
+| 15 | ffn_down_exps | Q6_K | 1,720,320 |
+
+Gate/up_exps were Q4_K in all tested layers, but should not be assumed to hold for every layer. This is likely due to per-tensor importance-matrix-guided quantization.
+
+**Implication for Phase 3:** Any code reading expert tensors MUST look up the quantization type per (layer, tensor_kind) individually via GGUF metadata — never hardcode an assumed quant type per tensor kind.
+
+### gguf-py tensor.data Structure Note
+
+Discovered and documented during Phase 2: `tensor.data` for quantized types is NOT a flat byte buffer. It's reshaped to reversed-ggml-axis order with the last axis converted from elements to bytes. Since the expert axis is the outermost ggml axis, after reversal it becomes axis 0 of the numpy array — so per-expert data is obtained via `tensor.data[expert_idx]`, NOT by computing a flat byte-range slice.
+
+Using flat byte slicing (`tensor.data[start:end]`) silently produces wrong results (returns whole array for expert 0 due to Python's slice clamping, empty arrays for others) without raising errors — a dangerous silent-failure mode to watch for.
+
+---
+
 ## Open Items
-
-### Before Phase 2
-
-- [ ] Confirm exact ggml quantization type names for tensor_type 12 and 14
-- [ ] Understand Q4_K and Q6_K block layouts for raw byte interpretation
 
 ### General
 

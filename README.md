@@ -43,6 +43,8 @@ Write a standalone reader that, given a (layer, expert index) pair, computes the
 - Verify each manually-read expert slice matches, byte-for-byte, the same slice already loaded by mmap
 - No inference happens in this phase — this is purely about proving the offset math is correct
 
+**Script:** `phase2_manual_expert_read.py` — Tests 36 combinations (3 layers × 3 tensor kinds × 4 experts) to verify offset calculations. Also discovered that quantization types vary per-layer (not just per-tensor-kind), which is crucial for Phase 3.
+
 **Exit criteria:** manual reads match mmap-loaded data exactly, across multiple layers and experts.
 
 ### Phase 3 — Naive synchronous streaming
