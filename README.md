@@ -269,6 +269,11 @@ GGUF is the format this project relies on for everything: quantized weight stora
 
 MIT License — see [LICENSE](LICENSE) for details.
 
+This project includes third-party dependencies:
+- llama.cpp — MIT License
+- gguf-py — MIT License
+- Model weights from Hugging Face — subject to their respective licenses
+
 ## Acknowledgments
 
 - The [BigMoeOnEdge](https://github.com/Helldez/BigMoeOnEdge) project, whose architecture and benchmark methodology this project's plan is directly modeled on
