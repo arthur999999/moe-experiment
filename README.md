@@ -47,10 +47,33 @@ Write a standalone reader that, given a (layer, expert index) pair, computes the
 
 **Exit criteria:** manual reads match mmap-loaded data exactly, across multiple layers and experts.
 
-### Phase 3 — Naive synchronous streaming
+### Phase 3 — Naive synchronous streaming — COMPLETE
+
 Hook llama.cpp's evaluation callback to intercept the router's top-k expert selection before the expert matmul runs, and substitute a just-in-time disk read for each selected expert instead of relying on mmap.
 - No caching, no parallelism — one token, one layer, one expert read at a time
 - Compare generated output against the Phase 1 reference output — must match exactly
+
+**Status:** COMPLETE — the correctness gate **PASSED**. Streamed inference produces token-for-token identical output to the resident baseline (mmap), and matches the freshly regenerated reference output. Speed is poor at this stage, as expected — correctness came first.
+
+**How it works:** the streamer hooks llama.cpp's public `cb_eval` (a `ggml_backend_sched_eval_callback`). During warm-up it discovers the expert tensors by scanning each node's `src[i]` for `ffn_gate_exps` / `ffn_up_exps` / `ffn_down_exps`. After warm-up it only observes the router nodes (`ffn_moe_topk-%d`, layer parsed via `sscanf`), reads that token's top-8 expert ids from the router buffer, `pread()`s exactly those gate/up/down slices from disk into scratch buffers, and rebinds the expert tensors' `->data` before the matmul runs.
+
+**Utilities:**
+- `src/cxx/phase3_stream.cpp` — the streamer (main + callback + pread + rebind)
+- `src/cxx/debug_graph.cpp` — graph debug / discovery helper
+- `scripts/build_phase3.sh` — build against the already-compiled llama.cpp
+- `scripts/run_phase3.sh` — runs with fixed config, separates stdout (text) / stderr (logs)
+- `validate_phase3.py` — compares streamer output vs reference (whitespace-normalized)
+- `doc/phase3_result.md` — full results, telemetry, and key findings
+
+**Telemetry (validation run):** `16 layers, 64 experts, top-8`; `[DIAG] layer0.gate data_offset=169841472 (expected 169841472)`; `warm-up: 32/32 experts discovered`; `Phase 3: 48768 reads, 128 tokens` = `(128 - 1) decodes x 16 layers x 8 experts x 3 tensors`.
+
+**Key findings (details in doc/phase3_result.md):**
+1. `gguf_get_tensor_offset()` is **relative to the tensor data section**, not the file — you must add `gguf_get_data_offset(ctx)` to get the absolute offset, or every `pread()` diverges.
+2. Returning `false` for `ask == true` batches non-router nodes; only router nodes are observed after warm-up.
+3. Expert weights appear as `src` of the `mul_mat_id` ops, never as standalone graph nodes.
+4. The router buffer is `[8, 1, 1, 1]` of `int32_t` expert ids; strategy A (full-size scratch buffer per tensor kind) was used, compact id-remap (strategy B) is deferred to Phase 4+.
+5. The prompt must be formatted with the model's chat template (`tokenizer.chat_template` + `llama_chat_apply_template`) to match reference generation.
+6. Controlled experiment: streaming ON == streaming OFF. Any divergence vs an external reference is a config/prompt difference, not a streaming bug.
 
 **Exit criteria:** streamed inference on OLMoE-1B-7B produces output identical to the resident baseline. Speed is expected to be poor at this stage — correctness comes first.
 
@@ -181,7 +204,7 @@ python compare_output.py --extra-args --some-flag
 
 **Output:** "MATCH" if output identical to reference, "MISMATCH" with diff if different.
 
-**Note:** The reference output is hardware/build-specific. See [model_layout_notes.md](model_layout_notes.md) for portability details.
+**Note:** The reference output is hardware/build-specific. See [doc/model_layout_notes.md](doc/model_layout_notes.md) for portability details.
 
 ## Benchmarks
 
@@ -190,7 +213,7 @@ Populated as each phase completes. No numbers are published here until they've b
 | Phase | Model | RAM budget | Streaming | tok/s | Peak RSS | Output verified vs. reference |
 |-------|-------|-----------|-----------|-------|----------|-------------------------------|
 | 1 | OLMoE-1B-7B (Q4_K_M) | 8GB | No (baseline) | *pending* | *pending* | N/A (this **is** the reference) |
-| 3 | OLMoE-1B-7B (Q4_K_M) | 8GB | Yes (naive) | *pending* | *pending* | *pending* |
+| 3 | OLMoE-1B-7B (Q4_K_M) | 8GB | Yes (naive) | *pending* | *pending* | PASS (token-for-token) |
 | 8 | ~27B MoE (Q4_K_M) | 8GB | Yes (full pipeline) | *pending* | *pending* | *pending* |
 
 ## Development
@@ -239,14 +262,20 @@ moe-experiment/
 │   └── OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf
 ├── reference_output.txt             # Phase 1 correctness gate (committed)
 ├── reference_output_raw.txt         # Raw llama-cli output (gitignored)
-├── model_layout_notes.md            # Detailed model analysis
-├── download_model.sh                # Model download script
-├── inspect_gguf.py                  # GGUF file inspector
-├── compare_output.py                # Output validator
+├── doc/                              # Documentation and reports
+│   ├── model_layout_notes.md            # Detailed model analysis
+│   └── phase3_result.md                 # Phase 3 results and key findings
+├── scripts/                         # Phase 3 build/run helpers
+│   ├── build_phase3.sh
+│   └── run_phase3.sh
+├── src/cxx/                         # C++ streaming code (Phase 3+)
+│   ├── phase3_stream.cpp
+│   ├── debug_graph.cpp
+│   └── ...
 └── ...
 ```
 
-**Important:** `reference_output.txt` is committed as the correctness gate, but output is only reproducible on the exact hardware/llama.cpp build that generated it. See model_layout_notes.md for details.
+**Important:** `reference_output.txt` is committed as the correctness gate, but output is only reproducible on the exact hardware/llama.cpp build that generated it. See doc/model_layout_notes.md for details.
 
 ## Research notes
 

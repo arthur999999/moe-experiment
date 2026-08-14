@@ -90,3 +90,10 @@ llama.cpp/Makefile
 # Ignore all build directories inside llama.cpp
 llama.cpp/**/build/
 llama.cpp/**/cmake-build-*/
+
+# Compiled C++ binaries (rebuilt via scripts/build_phase3.sh)
+src/cxx/phase3_stream
+src/cxx/debug_graph
+
+# Generated inference outputs (rebuilt via scripts/run_phase3.sh)
+outputs/
