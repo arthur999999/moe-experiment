@@ -77,10 +77,28 @@ Hook llama.cpp's evaluation callback to intercept the router's top-k expert sele
 
 **Exit criteria:** streamed inference on OLMoE-1B-7B produces output identical to the resident baseline. Speed is expected to be poor at this stage — correctness comes first.
 
-### Phase 4 — Expert cache
-Add an LRU (or similar) cache of recently-used experts in RAM, sized either manually or automatically based on available memory.
-- Measure cache hit rate and its effect on tokens/sec
-- Re-validate against the reference output after every change
+### Phase 4 — Expert LRU Cache + Strategy B — COMPLETE
+
+Add an LRU cache of experts in RAM plus Strategy B (compact expert buffers with router-id remapping) on top of the Phase 3 streamer. Instead of reading all routed experts from disk every token, recently-used experts are kept in a RAM cache; misses are the only reads that hit the disk. Strategy B keeps only the n_expert_used (8) experts in compact buffers instead of full-size fused tensors, substantially cutting the streaming's anonymous memory footprint.
+
+**Status:** COMPLETE — correctness gate **PASSED**, memory cost quantified, cliff threshold measured.
+
+**Key findings (details in doc/phase4_result.md):**
+1. Output with the LRU cache is **token-for-token identical** to output without it — cache changes where bytes come from, never the math.
+2. Each MiB of cache costs roughly 1 MiB of RssAnon — cost is flat and predictable.
+3. **Hard threshold between 256 MB and 512 MB:** ≤256 MB cache → 0% hit rate (evicts everything); 512 MB → 92.9% hit rate (40× fewer disk reads).
+4. Saturation at ~1.0–1.3 GB: 1,024 MB → 97.5%, 2,048 MB → 97.7% (marginal gain).
+5. tok/s is confounded on this machine (model fits in RAM) — meaningful throughput comparison requires Phase 8 (model > RAM).
+6. O_DIRECT confirmed inviable per-expert on this GGUF (EINVAL due to 32-byte alignment); plain buffered pread used.
+7. Streaming survives real memory pressure: completes normally under `MemoryMax=3G` without OOM.
+
+**Utilities:**
+- `src/cxx/phase4_stream.cpp` — streamer with LRU cache + Strategy B
+- `scripts/build_phase4.sh` — build against the already-compiled llama.cpp
+- `scripts/bench_phase4.sh` — per-cache-size benchmark (tok/s, RssAnon peak, RssFile peak, hit rate, disk reads)
+- `doc/phase4_result.md` — full results, telemetry, and key findings
+
+**Telemetry (1 GB cache run):** `32/32 experts discovered`; `Cache: hits=... misses=... hit_rate=97.5% disk_reads=1206`; `Phase 4: 128 tokens, ~11.9 s, ~10.76 tok/s`; `RssAnon peak: 1,181,916 kB`.
 
 ### Phase 5 — Parallel I/O
 Add multiple concurrent read lanes so several experts can be fetched from disk at once instead of sequentially.
@@ -214,6 +232,7 @@ Populated as each phase completes. No numbers are published here until they've b
 |-------|-------|-----------|-----------|-------|----------|-------------------------------|
 | 1 | OLMoE-1B-7B (Q4_K_M) | 8GB | No (baseline) | *pending* | *pending* | N/A (this **is** the reference) |
 | 3 | OLMoE-1B-7B (Q4_K_M) | 8GB | Yes (naive) | *pending* | *pending* | PASS (token-for-token) |
+| 4 | OLMoE-1B-7B (Q4_K_M) | 8GB | Yes (LRU cache + Strategy B) | ~10.7 | 1,181,916 kB (anon, 1 GB cache) | PASS (token-for-token) |
 | 8 | ~27B MoE (Q4_K_M) | 8GB | Yes (full pipeline) | *pending* | *pending* | *pending* |
 
 ## Development
@@ -265,9 +284,11 @@ moe-experiment/
 │   ├── reference_output_raw.txt         # Raw llama-cli output (committed)
 │   ├── model_layout_notes.md            # Detailed model analysis
 │   ├── phase3_result.md                 # Phase 3 results and key findings
+│   ├── phase4_result.md                 # Phase 4 results and key findings
 │   └── logs/                            # Baseline benchmark logs (gitignored)
 ├── scripts/                         # Build, run, and validation scripts
 │   ├── build_phase3.sh
+│   ├── build_phase4.sh
 │   ├── run_phase3.sh
 │   ├── compare_output.py                # Output validator
 │   ├── inspect_gguf.py                  # GGUF file inspector
@@ -275,6 +296,7 @@ moe-experiment/
 │   └── validate_phase3.py               # Phase 3 output validator
 ├── src/cxx/                         # C++ streaming code (Phase 3+)
 │   ├── phase3_stream.cpp
+│   ├── phase4_stream.cpp
 │   ├── debug_graph.cpp
 │   └── ...
 └── ...
