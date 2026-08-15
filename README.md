@@ -228,12 +228,24 @@ python scripts/compare_output.py --extra-args --some-flag
 
 Populated as each phase completes. No numbers are published here until they've been measured on real hardware with a fixed, documented configuration (device, thread count, prompt, seed).
 
-| Phase | Model | RAM budget | Streaming | tok/s | Peak RSS | Output verified vs. reference |
-|-------|-------|-----------|-----------|-------|----------|-------------------------------|
-| 1 | OLMoE-1B-7B (Q4_K_M) | 8GB | No (baseline) | *pending* | *pending* | N/A (this **is** the reference) |
-| 3 | OLMoE-1B-7B (Q4_K_M) | 8GB | Yes (naive) | *pending* | *pending* | PASS (token-for-token) |
-| 4 | OLMoE-1B-7B (Q4_K_M) | 8GB | Yes (LRU cache + Strategy B) | ~10.7 | 1,181,916 kB (anon, 1 GB cache) | PASS (token-for-token) |
-| 8 | ~27B MoE (Q4_K_M) | 8GB | Yes (full pipeline) | *pending* | *pending* | *pending* |
+All runs: OLMoE-1B-7B-0924-Instruct Q4_K_M, prompt *"Explain how mixture of experts routing works."*, 128 tokens, 4 threads, seed 42, greedy (temp 0). Measured on a machine where the model fits in RAM, so tok/s comparisons across streaming strategies are only meaningful relative to each other — absolute throughput vs a fully-resident baseline is a Phase 8 measurement.
+
+| Phase | Streaming | tok/s | RssAnon peak | Expert reads / token | Hit rate | Output verified |
+|-------|-----------|-------|-------------|---------------------|----------|-----------------|
+| 1 | No (resident baseline) | *pending* | *pending* | 0 | — | N/A (reference) |
+| 3 | Naive (no cache, full buffers) | *pending* | *pending* | 381 | — | PASS |
+| 4 (cache=0) | Naive (Strategy B compact buffers, no cache) | 10.18 | 125,368 kB | 381 | — | PASS |
+| 4 (cache=64 MB) | LRU + Strategy B | 6.86 | 200,396 kB | 381 | 0.0% | PASS |
+| 4 (cache=256 MB) | LRU + Strategy B | 7.15 | 397,776 kB | 381 | 0.0% | PASS |
+| 4 (cache=512 MB) | LRU + Strategy B | 10.64 | 677,788 kB | 27 | 92.9% | PASS |
+| 4 (cache=1 GB) | LRU + Strategy B | 10.76 | 1,181,916 kB | 9 | 97.5% | PASS |
+| 4 (cache=2 GB) | LRU + Strategy B | 10.71 | 1,510,500 kB | 9 | 97.7% | PASS |
+| 8 | ~27B MoE (Q4_K_M), 8GB budget | *pending* | *pending* | *pending* | *pending* | *pending* |
+
+- **RssAnon** = anonymous RAM paid by the streaming driver (cache + compact buffers + KV + heap). The model itself (4.2 GB) lives in mmap'd file-backed pages (RssFile ~4.1 GB), not counted here.
+- **Expert reads / token** = `(n_pred - 1) × n_layer × n_expert_used × 3 tensors / n_pred` = 381 at 0% hit rate. At 97.5% hit rate, only ~9 reads hit disk per token.
+- The **0% hit rate** at ≤256 MB cache confirms the working set is larger than 256 MB — the LRU evicts every expert before it's re-requested.
+- Saturation at ~1 GB: beyond that, more RAM buys negligible hit rate improvement.
 
 ## Development
 
