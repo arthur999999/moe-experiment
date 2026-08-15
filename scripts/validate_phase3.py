@@ -13,8 +13,8 @@ usage: python validate_phase3.py [output_file]
 import re
 import sys
 
-REFERENCE = "reference_output.txt"
-DEFAULT_OUTPUT = "outputs/phase3/phase3_output.txt"
+REFERENCE = "../doc/reference_output.txt"
+DEFAULT_OUTPUT = "../outputs/phase3/phase3_output.txt"
 
 
 def normalize(text: str) -> str:

@@ -5,7 +5,7 @@ Phase 1, Step 8: inspect the internal layout of the OLMoE GGUF file.
 
 from gguf import GGUFReader
 
-MODEL_PATH = "./models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf"
+MODEL_PATH = "../models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf"
 
 reader = GGUFReader(MODEL_PATH)
 

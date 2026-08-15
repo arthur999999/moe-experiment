@@ -249,7 +249,7 @@ Everything discovered in Phase 2 (offset formula behavior, block alignment, and 
 - Use different (or more varied) quantization types per tensor
 - Not have a clean divisor between n_bytes and n_expert at all
 
-`phase2_manual_expert_read.py` was written to discover these properties from metadata rather than assume them, and includes explicit guards (e.g. raises if the expert axis isn't where expected).
+`scripts/phase2_manual_expert_read.py` was written to discover these properties from metadata rather than assume them, and includes explicit guards (e.g. raises if the expert axis isn't where expected).
 
 **Mandatory Onboarding Step:** Going forward, running this verification script against a NEW model — and getting a clean PASS on all sampled combinations — is a **mandatory** step before trusting any offset math for that model, not an optional sanity check.
 
@@ -334,27 +334,27 @@ The `reference_output.txt` file is the **correctness gate** for every future pha
   -p "Explain how mixture of experts routing works." \
   -n 128 -t 4 --temp 0 --top-k 1 --seed 42 -no-cnv -st --no-repack \
   --simple-io --log-disable \
-  > reference_output_raw.txt
+  > doc/reference_output_raw.txt
 ```
 
 **Step 2:** Clean and extract generated text
 ```bash
-sed 's/\x1b\[[0-9;]*m//g' reference_output_raw.txt \
+sed 's/\x1b\[[0-9;]*m//g' doc/reference_output_raw.txt \
   | awk '/^> Explain/{flag=1; next} /^\[ Prompt:/{flag=0} flag' \
   | sed '/^$/N;/^\n$/D' \
-  > reference_output.txt
+  > doc/reference_output.txt
 ```
 
-**Step 3:** Normalize trailing whitespace to match `compare_output.py`
+**Step 3:** Normalize trailing whitespace to match `scripts/compare_output.py`
 ```bash
 python3 -c "
-content = open('reference_output.txt').read()
+content = open('doc/reference_output.txt').read()
 content = content.strip() + '\n'
-open('reference_output.txt', 'w').write(content)
+open('doc/reference_output.txt', 'w').write(content)
 "
 ```
 
-Without this step, `compare_output.py` reports a false MISMATCH due to
+Without this step, `scripts/compare_output.py` reports a false MISMATCH due to
 a trailing blank line left by the sed/awk pipeline above, even though
 the generated text content is identical. This bit us during Phase 1
 validation — see the script's `clean_output()` for the matching
@@ -368,10 +368,10 @@ The awk filter matches on `^> Explain` specifically — if the prompt text chang
 
 ## Reference Output Portability Note
 
-`reference_output.txt` IS committed to git — it's the correctness gate used by `compare_output.py`. However, greedy-decoded output is only guaranteed reproducible on the exact hardware + llama.cpp build that generated it.
+`reference_output.txt` IS committed to git — it's the correctness gate used by `scripts/compare_output.py`. However, greedy-decoded output is only guaranteed reproducible on the exact hardware + llama.cpp build that generated it.
 
 **Proof:** `--repack` vs `--no-repack` alone changes output on the SAME machine, due to floating-point reduction order differences.
 
-**Implication:** If this project moves to different hardware or a newer llama.cpp build, `reference_output.txt` likely needs to be regenerated before `compare_output.py` can be trusted again.
+**Implication:** If this project moves to different hardware or a newer llama.cpp build, `reference_output.txt` likely needs to be regenerated before `scripts/compare_output.py` can be trusted again.
 
 ---

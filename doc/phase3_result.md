@@ -20,7 +20,7 @@ The streaming implementation hooks llama.cpp's public `cb_eval` (a `ggml_backend
 - `src/cxx/debug_graph.cpp` -- graph debug / discovery helper
 - `scripts/build_phase3.sh` -- build against the already-compiled llama.cpp
 - `scripts/run_phase3.sh` -- runs with fixed config, separates stdout (text) / stderr (logs)
-- `validate_phase3.py` -- compares streamer output vs reference (whitespace-normalized)
+- `scripts/validate_phase3.py` -- compares streamer output vs reference (whitespace-normalized)
 
 ## Configuration
 

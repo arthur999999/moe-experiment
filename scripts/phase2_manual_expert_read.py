@@ -23,7 +23,7 @@ needing llama.cpp or any inference to be involved.
 import sys
 from gguf import GGUFReader, GGML_QUANT_SIZES, GGMLQuantizationType
 
-MODEL_PATH = "./models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf"
+MODEL_PATH = "../models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf"
 N_EXPERT = 64
 
 TENSOR_KINDS = ["ffn_gate_exps", "ffn_up_exps", "ffn_down_exps"]

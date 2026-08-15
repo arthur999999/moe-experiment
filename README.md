@@ -33,8 +33,8 @@ Run a small MoE model (**OLMoE-1B-7B**, Q4_K_M) fully resident in RAM using stoc
 - Inspect the GGUF file's internal tensor layout to understand how experts are stored (fused tensor shape, quantization type, byte offsets per expert)
 
 **Utilities:**
-- `inspect_gguf.py` — Python script using gguf-py to inspect tensor shapes, offsets, and quantization types
-- `compare_output.py` — Validates current llama.cpp output against the saved reference output
+- `scripts/inspect_gguf.py` — Python script using gguf-py to inspect tensor shapes, offsets, and quantization types
+- `scripts/compare_output.py` — Validates current llama.cpp output against the saved reference output
 
 **Exit criteria:** reproducible baseline numbers, a saved reference output, and a documented map of the expert tensor layout.
 
@@ -43,7 +43,7 @@ Write a standalone reader that, given a (layer, expert index) pair, computes the
 - Verify each manually-read expert slice matches, byte-for-byte, the same slice already loaded by mmap
 - No inference happens in this phase — this is purely about proving the offset math is correct
 
-**Script:** `phase2_manual_expert_read.py` — Tests 36 combinations (3 layers × 3 tensor kinds × 4 experts) to verify offset calculations. Also discovered that quantization types vary per-layer (not just per-tensor-kind), which is crucial for Phase 3.
+**Script:** `scripts/phase2_manual_expert_read.py` — Tests 36 combinations (3 layers × 3 tensor kinds × 4 experts) to verify offset calculations. Also discovered that quantization types vary per-layer (not just per-tensor-kind), which is crucial for Phase 3.
 
 **Exit criteria:** manual reads match mmap-loaded data exactly, across multiple layers and experts.
 
@@ -62,7 +62,7 @@ Hook llama.cpp's evaluation callback to intercept the router's top-k expert sele
 - `src/cxx/debug_graph.cpp` — graph debug / discovery helper
 - `scripts/build_phase3.sh` — build against the already-compiled llama.cpp
 - `scripts/run_phase3.sh` — runs with fixed config, separates stdout (text) / stderr (logs)
-- `validate_phase3.py` — compares streamer output vs reference (whitespace-normalized)
+- `scripts/validate_phase3.py` — compares streamer output vs reference (whitespace-normalized)
 - `doc/phase3_result.md` — full results, telemetry, and key findings
 
 **Telemetry (validation run):** `16 layers, 64 experts, top-8`; `[DIAG] layer0.gate data_offset=169841472 (expected 169841472)`; `warm-up: 32/32 experts discovered`; `Phase 3: 48768 reads, 128 tokens` = `(128 - 1) decodes x 16 layers x 8 experts x 3 tensors`.
@@ -180,26 +180,26 @@ cmake --build llama.cpp/build --config Release -j$(nproc)
 
 ### Phase 1 Utilities
 
-#### inspect_gguf.py
+#### scripts/inspect_gguf.py
 
 Inspects the GGUF file to extract tensor metadata (shapes, offsets, quantization types):
 
 ```bash
-python inspect_gguf.py
+python scripts/inspect_gguf.py
 ```
 
 **Output:** Architecture metadata, expert tensor shapes, file offsets, and per-expert byte calculations.
 
-#### compare_output.py
+#### scripts/compare_output.py
 
 Validates that current llama.cpp runs match the saved reference output:
 
 ```bash
 # Basic usage (uses default config)
-python compare_output.py
+python scripts/compare_output.py
 
 # Pass extra flags to llama-cli
-python compare_output.py --extra-args --some-flag
+python scripts/compare_output.py --extra-args --some-flag
 ```
 
 **Output:** "MATCH" if output identical to reference, "MISMATCH" with diff if different.
@@ -260,14 +260,19 @@ mypy src/
 moe-experiment/
 ├── models/                          # Downloaded model files (gitignored)
 │   └── OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf
-├── reference_output.txt             # Phase 1 correctness gate (committed)
-├── reference_output_raw.txt         # Raw llama-cli output (gitignored)
 ├── doc/                              # Documentation and reports
+│   ├── reference_output.txt             # Phase 1 correctness gate (committed)
+│   ├── reference_output_raw.txt         # Raw llama-cli output (committed)
 │   ├── model_layout_notes.md            # Detailed model analysis
-│   └── phase3_result.md                 # Phase 3 results and key findings
-├── scripts/                         # Phase 3 build/run helpers
+│   ├── phase3_result.md                 # Phase 3 results and key findings
+│   └── logs/                            # Baseline benchmark logs (gitignored)
+├── scripts/                         # Build, run, and validation scripts
 │   ├── build_phase3.sh
-│   └── run_phase3.sh
+│   ├── run_phase3.sh
+│   ├── compare_output.py                # Output validator
+│   ├── inspect_gguf.py                  # GGUF file inspector
+│   ├── phase2_manual_expert_read.py     # Manual expert offset verifier
+│   └── validate_phase3.py               # Phase 3 output validator
 ├── src/cxx/                         # C++ streaming code (Phase 3+)
 │   ├── phase3_stream.cpp
 │   ├── debug_graph.cpp
@@ -275,7 +280,7 @@ moe-experiment/
 └── ...
 ```
 
-**Important:** `reference_output.txt` is committed as the correctness gate, but output is only reproducible on the exact hardware/llama.cpp build that generated it. See doc/model_layout_notes.md for details.
+**Important:** `doc/reference_output.txt` is committed as the correctness gate, but output is only reproducible on the exact hardware/llama.cpp build that generated it. See doc/model_layout_notes.md for details.
 
 ## Research notes
 

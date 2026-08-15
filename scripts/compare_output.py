@@ -14,10 +14,10 @@ import subprocess
 import sys
 import difflib
 
-LLAMA_CLI = "./llama.cpp/build/bin/llama-cli"
-MODEL_PATH = "./models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf"
+LLAMA_CLI = "../llama.cpp/build/bin/llama-cli"
+MODEL_PATH = "../models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf"
 PROMPT = "Explain how mixture of experts routing works."
-REFERENCE_FILE = "reference_output.txt"
+REFERENCE_FILE = "../doc/reference_output.txt"
 
 BASE_ARGS = [
     "-m", MODEL_PATH,
