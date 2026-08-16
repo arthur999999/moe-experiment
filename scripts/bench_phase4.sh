@@ -18,7 +18,7 @@ set -euo pipefail
 CACHES=("${@:-0 64 512 1024}")
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$ROOT/src/cxx/phase4_stream"
+BIN="$ROOT/build/phase4_stream"
 MODEL="$ROOT/models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf"
 PROMPT="Explain how mixture of experts routing works."
 N_PRED="${N_PRED:-128}"

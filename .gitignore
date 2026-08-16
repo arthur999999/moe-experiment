@@ -91,9 +91,8 @@ llama.cpp/Makefile
 llama.cpp/**/build/
 llama.cpp/**/cmake-build-*/
 
-# Compiled C++ binaries (rebuilt via scripts/build_phase3.sh)
-src/cxx/phase3_stream
-src/cxx/phase4_stream
+# Compiled C++ binaries (rebuilt via scripts/build_phase*.sh)
+# Build output directory — binaries go to build/
 src/cxx/debug_graph
 
 # Generated inference outputs (rebuilt via scripts/run_phase3.sh)

@@ -6,7 +6,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LLAMA="$ROOT/llama.cpp"
 BUILD="$LLAMA/build/bin"
 SRC="$ROOT/src/cxx/phase4_stream.cpp"
-OUT="$ROOT/src/cxx/phase4_stream"
+OUT="$ROOT/build/phase4_stream"
+
+mkdir -p "$ROOT/build"
 
 g++ -std=c++11 -O2 \
   -I "$LLAMA/include" -I "$LLAMA/ggml/include" \

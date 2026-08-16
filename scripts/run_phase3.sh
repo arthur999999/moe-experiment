@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$ROOT/src/cxx/phase3_stream"
+BIN="$ROOT/build/phase3_stream"
 MODEL="$ROOT/models/OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf"
 PROMPT="Explain how mixture of experts routing works."
 N_PRED="${1:-128}"
