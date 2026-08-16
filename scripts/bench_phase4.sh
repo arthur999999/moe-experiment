@@ -12,10 +12,9 @@
 #
 # with model > RAM (Phase 8), RssFile doesn't stay — only Anon matters.
 #
-# uso: ./scripts/bench_phase4.sh [cache_mb ...]   (default: 0 64 512 1024 2048)
+# uso: ./scripts/bench_phase4.sh [-n tokens] [cache_mb ...]
+#   (default n_pred=128, cache: 0 64 512 1024 2048)
 set -euo pipefail
-
-CACHES=("${@:-0 64 512 1024 2048}")
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/build/phase4_stream"
@@ -24,6 +23,16 @@ PROMPT="Explain how mixture of experts routing works."
 N_PRED="${N_PRED:-128}"
 THREADS="${THREADS:-4}"
 SEED="${SEED:-42}"
+
+# argument parsing: -n <tokens> antes dos tamanhos de cache
+ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -n) N_PRED="$2"; shift 2 ;;
+        *)  ARGS+=("$1"); shift  ;;
+    esac
+done
+CACHES=("${ARGS[@]:-0 64 512 1024 2048}")
 OUT_DIR="$ROOT/outputs/phase4"
 mkdir -p "$OUT_DIR"
 
