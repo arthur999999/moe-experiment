@@ -12,10 +12,10 @@
 #
 # with model > RAM (Phase 8), RssFile doesn't stay — only Anon matters.
 #
-# uso: ./scripts/bench_phase4.sh [cache_mb ...]   (default: 0 64 512 1024)
+# uso: ./scripts/bench_phase4.sh [cache_mb ...]   (default: 0 64 512 1024 2048)
 set -euo pipefail
 
-CACHES=("${@:-0 64 512 1024}")
+CACHES=("${@:-0 64 512 1024 2048}")
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/build/phase4_stream"
