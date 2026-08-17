@@ -228,24 +228,47 @@ python scripts/compare_output.py --extra-args --some-flag
 
 Populated as each phase completes. No numbers are published here until they've been measured on real hardware with a fixed, documented configuration (device, thread count, prompt, seed).
 
-All runs: OLMoE-1B-7B-0924-Instruct Q4_K_M, prompt *"Explain how mixture of experts routing works."*, 128 tokens, 4 threads, seed 42, greedy (temp 0). Measured on a machine where the model fits in RAM, so tok/s comparisons across streaming strategies are only meaningful relative to each other — absolute throughput vs a fully-resident baseline is a Phase 8 measurement.
+All runs: OLMoE-1B-7B-0924-Instruct Q4_K_M, prompt *"Explain how mixture of experts routing works."*, 4 threads, seed 42, greedy (temp 0). Measured on a machine where the model fits in RAM.
 
-| Phase | Streaming | tok/s | RssAnon peak | Expert reads / token | Hit rate | Output verified |
-|-------|-----------|-------|-------------|---------------------|----------|-----------------|
-| 1 | No (resident baseline) | *pending* | *pending* | 0 | — | N/A (reference) |
-| 3 | Naive (no cache, full buffers) | *pending* | *pending* | 381 | — | PASS |
-| 4 (cache=0) | Naive (Strategy A full buffers, no cache) | 7.45 | 348,472 kB | 381 | — | PASS |
-| 4 (cache=64 MB) | LRU + Strategy A | 4.59 | 423,496 kB | 381 | 0.0% | PASS |
-| 4 (cache=512 MB) | LRU + Strategy A | 5.59 | 919,444 kB | 239 | 37.2% | PASS |
-| 4 (cache=1 GB) | LRU + Strategy A | 5.98 | 1,475,364 kB | 179 | 53.1% | PASS |
-| 4 (cache=2 GB) | LRU + Strategy A | 5.84 | 2,567,780 kB | 72 | 81.1% | PASS |
-| 8 | ~27B MoE (Q4_K_M), 8GB budget | *pending* | *pending* | *pending* | *pending* | *pending* |
+### 128 tokens
 
-- **RssAnon** = anonymous RAM paid by the streaming driver (cache + compact buffers + KV + heap). The model itself (4.2 GB) lives in mmap'd file-backed pages (RssFile ~4.1 GB), not counted here.
-- **Expert reads / token** = disk reads per token at that cache size (48,768 × 3 tensors / 128 tokens = 381 at 0% hit rate).
-- The **0% hit rate** at 64 MB cache confirms the working set is far larger — the LRU evicts every expert before it's re-requested. Hit rate climbs with cache size (37.2% at 512 MB → 81.1% at 2 GB).
-- **tok/s** is lower with cache ON at 128 tokens because the cache adds overhead (hash lookup, LRU eviction, full-size memcpy) that isn't amortized over such a short generation. At 512+ tokens the cache hits replace disk reads and cache ON becomes faster.
-- Saturation at ~1 GB: beyond that, more RAM buys negligible hit rate improvement.
+At 128 tokens the cache overhead (hash lookup, LRU eviction, full-size memcpy) is not amortized — cache=0 is the fastest.
+
+| Phase | Streaming | tok/s | RssAnon peak | disk_reads | Hit rate | Output verified |
+|-------|-----------|-------|-------------|-----------|----------|-----------------|
+| 4 (cache=0) | Naive, no cache | 7.45 | 348,472 kB | 48,768 | — | PASS |
+| 4 (cache=64 MB) | LRU + Strategy A | 4.59 | 423,496 kB | 48,768 | 0.0% | PASS |
+| 4 (cache=512 MB) | LRU + Strategy A | 5.59 | 919,444 kB | 30,636 | 37.2% | PASS |
+| 4 (cache=1 GB) | LRU + Strategy A | 5.98 | 1,475,364 kB | 22,869 | 53.1% | PASS |
+| 4 (cache=2 GB) | LRU + Strategy A | 5.84 | 2,567,780 kB | 9,237 | 81.1% | PASS |
+
+### 1024 tokens
+
+At 1024 tokens, `cache=2 GB` overtakes `cache=0` (+12%). The reason: `posix_fadvise(DONTNEED)` in the no-cache path evicts expert pages from the page cache *after* `pread()`, but llama.cpp accesses the same bytes via mmap immediately after for the matmul — causing a **major page fault** (re-read from disk). With cache hits, no `pread` / no `fadvise` occurs, so pages stay in the page cache and the mmap finds them without fault. Each cache hit saves **two I/Os** (pread + mmap fault), which is enough to win when amortized over enough tokens.
+
+| Phase | Streaming | tok/s | RssAnon peak | disk_reads | Hit rate | Output verified |
+|-------|-----------|-------|-------------|-----------|----------|-----------------|
+| 4 (cache=0) | Naive, no cache | 7.71 | 348,476 kB | 183,936 | — | PASS |
+| 4 (cache=64 MB) | LRU + Strategy A | 5.21 | 424,024 kB | 183,936 | 0.0% | PASS |
+| 4 (cache=1 GB) | LRU + Strategy A | 6.02 | 1,476,020 kB | 86,469 | 53.0% | PASS |
+| 4 (cache=2 GB) | LRU + Strategy A | **8.64** | 2,567,776 kB | 32,343 | 82.4% | PASS |
+
+### 3000 tokens
+
+At 3000 tokens the benefit disappears: the context window (default 512) overflows, triggering expensive context shifting. Attention compute (O(n²)) dominates, and I/O becomes a negligible fraction. All configurations converge.
+
+| Phase | Streaming | tok/s | RssAnon peak | disk_reads | Hit rate | Output verified |
+|-------|-----------|-------|-------------|-----------|----------|-----------------|
+| 4 (cache=0) | Naive, no cache | 6.75 | 348,476 kB | 183,936 | — | PASS |
+| 4 (cache=64 MB) | LRU + Strategy A | 5.22 | 440,508 kB | 183,936 | 0.0% | PASS |
+| 4 (cache=1 GB) | LRU + Strategy A | 6.55 | 1,505,576 kB | 86,469 | 53.0% | PASS |
+| 4 (cache=2 GB) | LRU + Strategy A | 6.83 | 2,597,332 kB | 32,343 | 82.4% | PASS |
+
+- **RssAnon** = anonymous RAM paid by the streaming driver (cache + staging buffers + KV + heap). The model itself (4.2 GB) lives in mmap'd file-backed pages (RssFile ~4.1 GB), not counted here.
+- **disk_reads** = total `pread()` calls in the run. At 0% hit rate: 128 tokens → 48,768 reads (381 per generated token), 1024+ tokens → 183,936 (higher absolute but fewer per-token because batches >1 during context shifting don't trigger the callback).
+- The **0% hit rate** at 64 MB confirms the working set is far larger — the LRU evicts every expert before re-use. Hit rate climbs with cache size: 53% at 1 GB → 82.4% at 2 GB.
+- At **1024 tokens**, `cache=2 GB` is the fastest (8.64 tok/s, +12% over cache=0). At **128** and **3000** tokens, cache does not help — at 128 it is not amortized, at 3000 the context overflow overhead dominates.
+- The cache is expected to matter most in **Phase 8** (model > RAM), where a miss means real page-fault I/O rather than a fast SSD read, and the context (n_ctx) will be tuned to match the workload.
 
 ## Development
 
