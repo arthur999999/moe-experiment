@@ -12,7 +12,7 @@
 #
 # with model > RAM (Phase 8), RssFile doesn't stay — only Anon matters.
 #
-# uso: ./scripts/bench_phase4.sh [-n tokens] [cache_mb ...]
+# usage: ./scripts/bench_phase4.sh [-n tokens] [cache_mb ...]
 #   (default n_pred=128, cache: 0 64 512 1024 2048)
 set -euo pipefail
 
@@ -24,7 +24,7 @@ N_PRED="${N_PRED:-128}"
 THREADS="${THREADS:-4}"
 SEED="${SEED:-42}"
 
-# argument parsing: -n <tokens> antes dos tamanhos de cache
+# argument parsing: -n <tokens> before cache sizes
 ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in

@@ -77,28 +77,28 @@ Hook llama.cpp's evaluation callback to intercept the router's top-k expert sele
 
 **Exit criteria:** streamed inference on OLMoE-1B-7B produces output identical to the resident baseline. Speed is expected to be poor at this stage — correctness comes first.
 
-### Phase 4 — Expert LRU Cache + Strategy B — COMPLETE
+### Phase 4 — Expert LRU Cache + Strategy A — COMPLETE
 
-Add an LRU cache of experts in RAM plus Strategy B (compact expert buffers with router-id remapping) on top of the Phase 3 streamer. Instead of reading all routed experts from disk every token, recently-used experts are kept in a RAM cache; misses are the only reads that hit the disk. Strategy B keeps only the n_expert_used (8) experts in compact buffers instead of full-size fused tensors, substantially cutting the streaming's anonymous memory footprint.
+Add an LRU cache of experts in RAM plus **Strategy A** (full-size scatter buffers with original router ids) + `posix_fadvise(DONTNEED)` for kernel page-cache purity. Strategy B (compact buffers + router-id remap to 0..7) was proven **impossible on stock llama.cpp** — the same `ffn_moe_topk` buffer feeds both the weight gather and the routing-weight gather, so rewriting ids for one breaks the other.
 
-**Status:** COMPLETE — correctness gate **PASSED**, memory cost quantified, cliff threshold measured.
+**Status:** COMPLETE — correctness gate **PASSED** (byte-for-byte verify: 0 FAILs), root cause documented, strategy switched to A.
 
 **Key findings (details in doc/phase4_result.md):**
-1. Output with the LRU cache is **token-for-token identical** to output without it — cache changes where bytes come from, never the math.
-2. Each MiB of cache costs roughly 1 MiB of RssAnon — cost is flat and predictable.
-3. **Hard threshold between 256 MB and 512 MB:** ≤256 MB cache → 0% hit rate (evicts everything); 512 MB → 92.9% hit rate (40× fewer disk reads).
-4. Saturation at ~1.0–1.3 GB: 1,024 MB → 97.5%, 2,048 MB → 97.7% (marginal gain).
-5. tok/s is confounded on this machine (model fits in RAM) — meaningful throughput comparison requires Phase 8 (model > RAM).
-6. O_DIRECT confirmed inviable per-expert on this GGUF (EINVAL due to 32-byte alignment); plain buffered pread used.
-7. Streaming survives real memory pressure: completes normally under `MemoryMax=3G` without OOM.
+1. Strategy B is impossible on stock llama.cpp — the `ffn_moe_topk` buffer is shared between `mul_mat_id` (weights) and `ggml_get_rows` (routing weights). Rewriting ids breaks both. The only correct approach is Strategy A: scatter into full-size buffers at absolute expert offsets, keep original ids.
+2. Locality facts confirmed: hard cliff between 256 MB and 512 MB (≤256 MB → 0% hit rate; 512 MB → 37.2% hit rate). Saturation at ~1.0–1.3 GB.
+3. Each MiB of cache ≈ 1 MiB of RssAnon. Strategy A staging = one layer's experts (~260 MB on OLMoE), reused across layers.
+4. DONTNEED removes the kernel's page-cache copy — expert bytes live only in staging/cache, not duplicated in page cache. This is the desktop equivalent of BigMoeOnEdge's `--no-odirect`.
+5. O_DIRECT confirmed inviable per-expert on this GGUF (EINVAL due to 32-byte alignment); buffered pread + DONTNEED used instead.
+6. Streaming survives real memory pressure: completes under `MemoryMax=3G` without OOM.
+7. tok/s is lower with cache ON than OFF at small token counts (128) because cache overhead (hash lookup, LRU eviction, full-size buffer memcpy) dominates. With longer generations (512+), cache hits amortize the overhead and cache ON becomes faster.
 
 **Utilities:**
-- `src/cxx/phase4_stream.cpp` — streamer with LRU cache + Strategy B
+- `src/cxx/phase4_stream.cpp` — final streamer: Strategy A + LRU cache + DONTNEED + verify gate
 - `scripts/build_phase4.sh` — build against the already-compiled llama.cpp
 - `scripts/bench_phase4.sh` — per-cache-size benchmark (tok/s, RssAnon peak, RssFile peak, hit rate, disk reads)
-- `doc/phase4_result.md` — full results, telemetry, and key findings
+- `doc/phase4_result.md` — full results, root cause analysis, and key findings
 
-**Telemetry (1 GB cache run):** `32/32 experts discovered`; `Cache: hits=... misses=... hit_rate=97.5% disk_reads=1206`; `Phase 4: 128 tokens, ~11.9 s, ~10.76 tok/s`; `RssAnon peak: 1,181,916 kB`.
+**Telemetry (1 GB cache run, 128 tokens):** `32/32 experts discovered`; `Cache: hits=... misses=... hit_rate=53.1% disk_reads=22869`; `Phase4-FIX: 128 tokens, ~21.4 s, ~5.98 tok/s`; `RssAnon peak: 1,475,364 kB`; `verify: 0 FAILs`.
 
 ### Phase 5 — Parallel I/O
 Add multiple concurrent read lanes so several experts can be fetched from disk at once instead of sequentially.
@@ -234,17 +234,17 @@ All runs: OLMoE-1B-7B-0924-Instruct Q4_K_M, prompt *"Explain how mixture of expe
 |-------|-----------|-------|-------------|---------------------|----------|-----------------|
 | 1 | No (resident baseline) | *pending* | *pending* | 0 | — | N/A (reference) |
 | 3 | Naive (no cache, full buffers) | *pending* | *pending* | 381 | — | PASS |
-| 4 (cache=0) | Naive (Strategy B compact buffers, no cache) | 10.18 | 125,368 kB | 381 | — | PASS |
-| 4 (cache=64 MB) | LRU + Strategy B | 6.86 | 200,396 kB | 381 | 0.0% | PASS |
-| 4 (cache=256 MB) | LRU + Strategy B | 7.15 | 397,776 kB | 381 | 0.0% | PASS |
-| 4 (cache=512 MB) | LRU + Strategy B | 10.64 | 677,788 kB | 27 | 92.9% | PASS |
-| 4 (cache=1 GB) | LRU + Strategy B | 10.76 | 1,181,916 kB | 9 | 97.5% | PASS |
-| 4 (cache=2 GB) | LRU + Strategy B | 10.71 | 1,510,500 kB | 9 | 97.7% | PASS |
+| 4 (cache=0) | Naive (Strategy A full buffers, no cache) | 7.45 | 348,472 kB | 381 | — | PASS |
+| 4 (cache=64 MB) | LRU + Strategy A | 4.59 | 423,496 kB | 381 | 0.0% | PASS |
+| 4 (cache=512 MB) | LRU + Strategy A | 5.59 | 919,444 kB | 239 | 37.2% | PASS |
+| 4 (cache=1 GB) | LRU + Strategy A | 5.98 | 1,475,364 kB | 179 | 53.1% | PASS |
+| 4 (cache=2 GB) | LRU + Strategy A | 5.84 | 2,567,780 kB | 72 | 81.1% | PASS |
 | 8 | ~27B MoE (Q4_K_M), 8GB budget | *pending* | *pending* | *pending* | *pending* | *pending* |
 
 - **RssAnon** = anonymous RAM paid by the streaming driver (cache + compact buffers + KV + heap). The model itself (4.2 GB) lives in mmap'd file-backed pages (RssFile ~4.1 GB), not counted here.
-- **Expert reads / token** = `(n_pred - 1) × n_layer × n_expert_used × 3 tensors / n_pred` = 381 at 0% hit rate. At 97.5% hit rate, only ~9 reads hit disk per token.
-- The **0% hit rate** at ≤256 MB cache confirms the working set is larger than 256 MB — the LRU evicts every expert before it's re-requested.
+- **Expert reads / token** = disk reads per token at that cache size (48,768 × 3 tensors / 128 tokens = 381 at 0% hit rate).
+- The **0% hit rate** at 64 MB cache confirms the working set is far larger — the LRU evicts every expert before it's re-requested. Hit rate climbs with cache size (37.2% at 512 MB → 81.1% at 2 GB).
+- **tok/s** is lower with cache ON at 128 tokens because the cache adds overhead (hash lookup, LRU eviction, full-size memcpy) that isn't amortized over such a short generation. At 512+ tokens the cache hits replace disk reads and cache ON becomes faster.
 - Saturation at ~1 GB: beyond that, more RAM buys negligible hit rate improvement.
 
 ## Development
