@@ -1,6 +1,6 @@
 # Phase 5 — Parallel I/O (RESULTS)
 
-**Status:** ✅ COMPLETE — Multiple concurrent read lanes, verified byte-identical
+**Status:**  COMPLETE — Multiple concurrent read lanes, verified byte-identical
 
 ## Summary
 
@@ -28,10 +28,10 @@ Phase 5 adds parallel `pread()` lanes to the Phase 4 streamer so that multiple e
 
 | Check | Result |
 |-------|--------|
-| Stream OFF (resident mmap, baseline) | ✅ coherent text |
-| Stream ON (any lanes x cache) | ✅ coherent text, **verify: 0 FAILs** |
+| Stream OFF (resident mmap, baseline) |  coherent text |
+| Stream ON (any lanes x cache) |  coherent text, **verify: 0 FAILs** |
 | warm-up discovery | 32/32 experts |
-| Stream ON vs OFF diff | ✅ PASS (identical output) |
+| Stream ON vs OFF diff |  PASS (identical output) |
 
 ## Benchmark Results
 

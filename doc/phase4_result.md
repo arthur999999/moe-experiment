@@ -1,6 +1,6 @@
 # Phase 4 — Expert LRU Cache + Corrected Strategy (RESULTS)
 
-**Status:** ✅ COMPLETE (CORRECTED) — Strategy B diagnosed, root cause found, final = Strategy A + DONTNEED, byte-validated
+**Status:**  COMPLETE (CORRECTED) — Strategy B diagnosed, root cause found, final = Strategy A + DONTNEED, byte-validated
 
 ## Summary
 
@@ -22,7 +22,7 @@ Evidence chain (all reproduced on this machine):
 1. llama-cli (resident) → coherent text. Streaming (Strategy B) → garbage `:...a:...`.
 2. Reads were proven 100% correct — `verify: 0 FAILs` on Strategy A — so offsets/bytes were never the issue.
 3. Source analysis (llama.cpp dict 0b1bad14f):
-   - `ggml_mul_mat_id` (ggml-cpu.c) accepts ids 0..7 to index a compact weight buffer ✅.
+   - `ggml_mul_mat_id` (ggml-cpu.c) accepts ids 0..7 to index a compact weight buffer .
    - `build_moe_ffn` (llama-graph.cpp) binds `weights = ggml_get_rows(ctx0, probs, selected_experts)`
      — the ROUTING-WEIGHT gather uses the SAME `ffn_moe_topk` buffer. Rewritten ids cause it
      to gather `probs[0..7]` instead of `probs[eid]` → wrong scales → deterministic garbage.
@@ -55,10 +55,10 @@ BigMoeOnEdge does exactly this (scatter + cache, never rewrites ids).
 
 | Check | Result |
 |-------|--------|
-| Residence baseline (llama-cli, same build) | ✅ coherent text |
-| Streamed (Strategy A, cache=0, DONTNEED, verify=1) | ✅ coherent text, **verify: 0 FAILs** |
+| Residence baseline (llama-cli, same build) |  coherent text |
+| Streamed (Strategy A, cache=0, DONTNEED, verify=1) |  coherent text, **verify: 0 FAILs** |
 | warm-up discovery | 32/32 expert tensors |
-| DONTNEED innocence | ✅ confirmed (Strategy A + DONTNEED = 0 FAILs + coherent) |
+| DONTNEED innocence |  confirmed (Strategy A + DONTNEED = 0 FAILs + coherent) |
 
 `verify=1` memcmp's every pread against the mmap'd source: **0 FAILs** ⇒ the streaming reads
 are byte-exact; only the buffer/ids mechanics remained, and Strategy A makes them correct by construction.
