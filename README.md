@@ -125,6 +125,55 @@ Add multiple concurrent read lanes so several experts can be fetched from disk a
 
 **Telemetry (128 tok, cache=0, 2 lanes):** `16 layers, 64 experts, top-8, cache=0MiB, lanes=2`; `Phase5: 128 tokens, 17.09s, 7.49 tok/s`; `Cache: disabled. disk_reads=48768`; `verify: 0 FAILs`.
 
+### Phase 6.5 — Dense-Weights Policy + Durable Page-Cache Purity — COMPLETE
+
+Extend Phase 5 with a **dense (non-expert) weight policy** and make the page-cache eviction **durable** on both sides of the model — experts (bounded by LRU budget) and dense (pinned resident in anon buffers).
+
+**Status:** COMPLETE — correctness gate green (6/6, stream ON == OFF per policy), dense-residency gate green (dense 7.8% `PURE`), memory bench delivered.
+
+**Design (doc/phase6_5_design.md):**
+
+Three mechanisms that overlap but do not substitute:
+
+| Mechanism | What it does | Nature |
+|---|---|---|
+| `posix_fadvise(DONTNEED)` | Drops **file-backed page-cache** pages for a byte range | precise, active, per-range |
+| `mlock()` | Pins **anonymous** pages in RAM | absolute, per-buffer |
+| `MemoryMax` (cgroup v2) | Global RSS cap; kernel reclaims coldest clean file pages first | coarse, reactive, global |
+
+**Design A — Durable expert page-cache purity:**
+- A1. Split verify from benchmark runs (benchmark runs pass `verify=0`, memcmp replaced by mincore)
+- A2. `restore_all()` removed from the single-token decode path (experts stay rebound across decodes)
+- A3. Batched decode (`ne>1`) avoided via `n_ctx` sizing; guard stays as safety net
+- A4. Purity gated by `check_cache_purity.py` (mincore)
+
+**Design B — Dense (non-expert) weight policy:**
+- B1. Discovery on the ASK pass (scans every graph node = version-proof)
+- B2. Byte ranges: complement of expert spans in the file
+- B3. Three policies: `mmap` (baseline, file-backed), `warm` (WILLNEED once, never DONTNEED'd), `anon` (pread into anon buffers, rebind, DONTNEED the file ranges)
+- B4. Anon pipeline: page-aligned buffers, parallel pread via IoPool, boot memcmp verify, tensor rebind, fadvise(DONTNEED) + madvise(MADV_DONTNEED) on dense ranges
+- B5. Optional `mlock` (best-effort, rlimit-aware)
+- B6. Residency sensor (mincore over anon buffers or MAP_SHARED view, major-fault deltas)
+
+**Key findings (details in doc/phase6_5_result.md):**
+1. The eviction primitive for mapped pages is **two-step**: `madvise(MADV_DONTNEED)` then `posix_fadvise(DONTNEED)`. `fadvise` alone skips clean mapped pages (false success); madvise zaps PTEs, then fadvise invalidates cache. Dense: 98% → 7.8%.
+2. `mincore` measures page-cache residency, not PTE presence — the sensor and the purity gate must be read accordingly.
+3. ASK-pass discovery is the version-proof surface — scanning `t` + `t->src[i]` for every graph node guarantees coverage in any llama.cpp release (fixes the `0/32` crash from newer llama.cpp fused-op graphs).
+4. Experts need a **boot-time full-range drop**, not just per-miss — per-miss madvise only covers re-read experts; a boot-drop over all expert ranges brought experts from 22.5% to 7.9%.
+5. Peak RssFile ≈ full model regardless of policy on a RAM-resident box — measure rest/steady-state instead.
+6. RAM-bound math: file cache is reclaimable under pressure, so "does it fit" is about the anon sum `dense(anon) + LRU + KV + staging + base < cap`.
+
+**Utilities:**
+- `doc/phase6_5_design.md` — design document for memory policy
+- `doc/phase6_5_result.md` — full results and key findings
+- `src/cxx/phase6_5_stream.cpp` — streamer with dense policy + boot-drop + residency sensor
+- `scripts/build_phase6_5.sh` — build against compiled llama.cpp
+- `scripts/run_phase6_5.sh` — self-contained correctness gate (stream ON == OFF per dense policy + cross-policy)
+- `scripts/bench_phase6_5.sh` — memory-focused benchmark (peak RSS + RssAnon/RssFile split)
+- `scripts/check_dense_residency.py` — gate 3: mincore over dense file ranges (PURE if < 15%)
+
+**Correctness:** `scripts/run_phase6_5.sh 4 0 1 2` — GATE PASS ×6 (stream ON == OFF for mmap/warm/anon, cross-policy rebind lossless, `verify: 0 FAILs`, boot verify `0 FAILs`).
+
 ### Phase 6 — I/O / compute overlap
 Overlap expert reads for the *next* computation with the *current* matmul, hiding disk latency behind compute time.
 - Still must remain byte-identical to the reference output — overlap changes timing, not results
@@ -354,15 +403,21 @@ moe-experiment/
 │   ├── model_layout_notes.md            # Detailed model analysis
 │   ├── phase3_result.md                 # Phase 3 results and key findings
 │   ├── phase4_result.md                 # Phase 4 results and key findings
-│   └── phase5_result.md                 # Phase 5 results and key findings
+│   ├── phase5_result.md                 # Phase 5 results and key findings
+│   ├── phase6_5_design.md               # Phase 6.5 design document
+│   └── phase6_5_result.md               # Phase 6.5 results and key findings
 ├── scripts/                         # Build, run, and validation scripts
 │   ├── build_phase3.sh
 │   ├── build_phase4.sh
 │   ├── build_phase5.sh
+│   ├── build_phase6_5.sh
 │   ├── run_phase3.sh
 │   ├── run_phase5.sh
+│   ├── run_phase6_5.sh
 │   ├── bench_phase5.sh
+│   ├── bench_phase6_5.sh
 │   ├── check_cache_purity.py
+│   ├── check_dense_residency.py
 │   ├── compare_output.py                # Output validator
 │   ├── inspect_gguf.py                  # GGUF file inspector
 │   ├── phase2_manual_expert_read.py     # Manual expert offset verifier
@@ -371,6 +426,7 @@ moe-experiment/
 │   ├── phase3_stream.cpp
 │   ├── phase4_stream.cpp
 │   ├── phase5_stream.cpp
+│   ├── phase6_5_stream.cpp
 │   ├── debug_graph.cpp
 │   └── ...
 └── ...
