@@ -174,6 +174,27 @@ Three mechanisms that overlap but do not substitute:
 
 **Correctness:** `scripts/run_phase6_5.sh 4 0 1 2` — GATE PASS ×6 (stream ON == OFF for mmap/warm/anon, cross-policy rebind lossless, `verify: 0 FAILs`, boot verify `0 FAILs`).
 
+**Phase 6.5 — Mixtral-8x7B validation:**
+
+The same Phase 6.5 memory policy was ported to **Mixtral-8x7B-Instruct Q4_K_M** (~26 GB, 32 layers, 8 experts, top-2) and tested on a **16 GB RAM / CPU-only / NVMe** machine — a genuine over-budget scenario where dense+expert streaming is required just to fit the model.
+
+**Key result (doc/mixtral_test_result.md):**
+- **Dense anon policy works:** 227 tensors, 1081 MiB, boot verify 0 FAILs, 100% resident, 49 total major faults (2.46/tok).
+- **Experts are I/O-bound:** 64 MiB LRU cache is far too small (holds <1 expert span), hit rate 34.3%, 2508 disk reads / 20 tokens ≈ 125 misses/token.
+- **Throughput:** 20 tokens in 171.28 s → **0.12 tok/s**.
+- **Root cause:** 64 MiB cache + no cross-layer overlap + no O_DIRECT. The dense path is no longer the bottleneck — expert I/O is.
+- **Projected end-state** with cache 2–4 GiB, overlap, and O_DIRECT: **0.6–0.9 tok/s** (4–6× improvement).
+
+**Utilities (Mixtral-specific):**
+- `src/cxx/phase_mixtral.cpp` — Phase 6.5 port for Mixtral (llama.* metadata keys, ASK-pass discovery)
+- `scripts/build_phase_mixtral.sh` — build against compiled llama.cpp
+- `scripts/inspect_mixtral.py` — GGUF layout inspector for Mixtral
+- `scripts/download_model_mixtral.sh` / `download_mixtral_new.sh` — model download scripts
+- `doc/mixtral_test_result.md` — full test result and analysis
+
+**ASM (assembly) notes — DNNL / oneDNN vectorization:**
+The `phase_mixtral.cpp` file also includes detailed ASM-level analysis of the DNNL/oneDNN inner loop on this machine (AVX2, Ivy Bridge pipeline, Haswell μop fusion, Skylake L2 streamer). See the source file header for the full breakdown, which documents why `vpermd` + `vpshufb` is the critical path in `brgemm`, and why `-DGGML_CPU_REPACK=OFF` is required (the repack pass OOMs on 16 GB RAM by trying to allocate a ~21 GB CPU_REPACK buffer).
+
 ### Phase 6 — I/O / compute overlap
 Overlap expert reads for the *next* computation with the *current* matmul, hiding disk latency behind compute time.
 - Still must remain byte-identical to the reference output — overlap changes timing, not results
@@ -383,6 +404,7 @@ mypy src/
 
 ### Models used across phases
 - [OLMoE-1B-7B](https://huggingface.co/allenai/OLMoE-1B-7B-0924) — Phase 1–3 baseline and streaming validation model
+- [Mixtral-8x7B-Instruct-v0.1](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1) — Phase 6.5 memory policy validation on a 26 GB over-budget model (16 GB RAM target)
 - [Qwen1.5-MoE-A2.7B](https://huggingface.co/Qwen/Qwen1.5-MoE-A2.7B) — Phase 8, first real memory-pressure test
 - [Qwen3-30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B) — Phase 8, several-times-over-budget test
 - Target ~27B-class MoE model — final Phase 8 milestone, exact model TBD based on GGUF availability and architecture support
@@ -396,7 +418,8 @@ mypy src/
 ```
 moe-experiment/
 ├── models/                          # Downloaded model files (gitignored)
-│   └── OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf
+│   ├── OLMoE-1B-7B-0924-Instruct-Q4_K_M.gguf
+│   └── mixtral-8x7b-instruct-v0.1-q4_k_m.gguf  # Phase 6.5 Mixtral validation
 ├── doc/                              # Documentation and reports
 │   ├── reference_output.txt             # Phase 1 correctness gate (committed)
 │   ├── reference_output_raw.txt         # Raw llama-cli output (committed)
@@ -405,12 +428,14 @@ moe-experiment/
 │   ├── phase4_result.md                 # Phase 4 results and key findings
 │   ├── phase5_result.md                 # Phase 5 results and key findings
 │   ├── phase6_5_design.md               # Phase 6.5 design document
-│   └── phase6_5_result.md               # Phase 6.5 results and key findings
+│   ├── phase6_5_result.md               # Phase 6.5 results and key findings
+│   └── mixtral_test_result.md            # Mixtral-8x7B Phase 6.5 validation result
 ├── scripts/                         # Build, run, and validation scripts
 │   ├── build_phase3.sh
 │   ├── build_phase4.sh
 │   ├── build_phase5.sh
 │   ├── build_phase6_5.sh
+│   ├── build_phase_mixtral.sh       # Mixtral-specific build
 │   ├── run_phase3.sh
 │   ├── run_phase5.sh
 │   ├── run_phase6_5.sh
@@ -420,6 +445,7 @@ moe-experiment/
 │   ├── check_dense_residency.py
 │   ├── compare_output.py                # Output validator
 │   ├── inspect_gguf.py                  # GGUF file inspector
+│   ├── inspect_mixtral.py               # Mixtral GGUF layout inspector
 │   ├── phase2_manual_expert_read.py     # Manual expert offset verifier
 │   └── validate_phase3.py               # Phase 3 output validator
 ├── src/cxx/                         # C++ streaming code (Phase 3+)
@@ -427,8 +453,12 @@ moe-experiment/
 │   ├── phase4_stream.cpp
 │   ├── phase5_stream.cpp
 │   ├── phase6_5_stream.cpp
+│   ├── phase_mixtral.cpp               # Mixtral-8x7B Phase 6.5 port
 │   ├── debug_graph.cpp
 │   └── ...
+├── download_model.sh                # OLMoE model download
+├── download_model_mixtral.sh        # Mixtral model download (Hugging Face)
+├── download_mixtral_new.sh          # Mixtral model download (Hugging Face, alt)
 └── ...
 ```
 
